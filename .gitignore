@@ -1,0 +1,4 @@
+.env
+sec-edgar-filings/
+__pycache__/
+*.xlsx
