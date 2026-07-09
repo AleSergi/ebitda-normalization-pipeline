@@ -4,36 +4,59 @@ from bs4 import BeautifulSoup
 
 
 def extract_item_7(folder_path: str) -> str:
-    """
-    Legge il file 10-K dalla cartella specificata, pulisce i tag HTML
-    ed estrae esclusivamente la sezione Item 7 (MD&A) tramite Regex.
-    """
-    # Trova il file del documento (solitamente con estensione .txt o .htm)
-    file_name = os.listdir(folder_path)[0]
-    file_path = os.path.join(folder_path, file_name, "full-submission.txt")
+    target_file = None
 
-    # Apre il file in modalità lettura gestendo l'encoding
-    with open(file_path, 'r', encoding='utf-8') as file:
-        raw_html = file.read()
+    # 1A. Ricerca primaria: File HTML pulito
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.lower().endswith((".htm", ".html")):
+                target_file = os.path.join(root, file)
+                break
+        if target_file: break
 
-    # Parsing dell'HTML tramite BeautifulSoup per estrarre solo il testo (ignora tabelle/immagini complesse)
-    soup = BeautifulSoup(raw_html, "html.parser")
+    # 1B. Fallback: File di testo grezzo
+    if not target_file:
+        for root, dirs, files in os.walk(folder_path):
+            if "full-submission.txt" in files:
+                target_file = os.path.join(root, "full-submission.txt")
+                break
+
+    if not target_file:
+        raise FileNotFoundError(f"Errore: Nessun bilancio scaricato in {folder_path}")
+
+    # 2. Lettura del file
+    with open(target_file, 'r', encoding='utf-8') as file:
+        raw_text = file.read()
+
+    # 3. Pulizia d'emergenza (rimuove l'header SGML se presente)
+    start_pos = raw_text.find("<DOCUMENT>")
+    if start_pos != -1:
+        raw_text = raw_text[start_pos:]
+
+    # 4. Appiattimento dei tag HTML con BeautifulSoup
+    soup = BeautifulSoup(raw_text, "html.parser")
     clean_text = soup.get_text(separator=' ', strip=True)
 
-    # Compilazione dei pattern Regex per trovare l'inizio di Item 7 e l'inizio di Item 8
-    # re.IGNORECASE permette di intercettare variazioni di maiuscole/minuscole
-    pattern_start = re.compile(r"Item\s+7\.\s+Management['’]s\s+Discussion\s+and\s+Analysis", re.IGNORECASE)
-    pattern_end = re.compile(r"Item\s+8\.\s+Financial\s+Statements\s+and\s+Supplementary\s+Data", re.IGNORECASE)
+    # 5. Estrazione logica (Ricerca multipla per bypassare l'Indice)
+    pattern = re.compile(
+        r"(item\s*7\.\s*management['’]s\s*discussion.*?)(item\s*8\.)",
+        re.IGNORECASE | re.DOTALL
+    )
 
-    # Ricerca delle corrispondenze all'interno della stringa pulita
-    match_start = pattern_start.search(clean_text)
-    match_end = pattern_end.search(clean_text)
+    # finditer trova TUTTE le occorrenze, non si ferma alla prima
+    matches = pattern.finditer(clean_text)
 
-    # Se i pattern non vengono trovati, solleva un'eccezione
-    if not match_start or not match_end:
-        raise ValueError("Impossibile individuare i delimitatori Item 7 o Item 8 nel testo.")
+    extracted_text = ""
+    for match in matches:
+        text_found = match.group(1).strip()
+        # Teniamo solo il match più lungo (il capitolo vero, non l'indice)
+        if len(text_found) > len(extracted_text):
+            extracted_text = text_found
 
-    # Slicing della stringa per isolare il testo compreso tra i due match
-    item_7_text = clean_text[match_start.end():match_end.start()].strip()
-
-    return item_7_text
+    # Un vero MD&A è lungo almeno qualche migliaio di caratteri
+    if extracted_text and len(extracted_text) > 2000:
+        print(f"      Successo: Estratti {len(extracted_text)} caratteri utili (Capitolo trovato).")
+        return extracted_text
+    else:
+        raise ValueError(
+            f"Parser fallito: Trovati solo {len(extracted_text)} caratteri. Probabilmente ha letto solo l'indice.")

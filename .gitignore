@@ -1,4 +1,10 @@
 .env
+venv/
+.venv/
+env/
+.idea/
 sec-edgar-filings/
 __pycache__/
 *.xlsx
+*pyc
+.DS_Store
